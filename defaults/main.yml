@@ -1,0 +1,97 @@
+---
+
+firehol__enabled: True
+
+# If you install by your own, you can skip installation
+firehol__install: True
+
+# external rpm (for centos/RHEL)
+firehol__rpm_url: 'https://github.com/firehol/packages/releases/download/2017-02-07-2116/firehol-3.1.2-1.el7.centos.noarch.rpm'
+
+### variables controlling firehol default config
+firehol__conf_version: 6
+## misc settings
+firehol__load_kernel_modules: "{{ 0 if ansible_virtualization_type in ['lxc', 'openvz'] else 1 }}"
+# tbd if optimal for PROD
+firehol__ruleset_mode: 'accurate'  # optimal
+# tbd if 0 and using protection rules in interfaces, bcause 1 also drops ipv6 NDP
+firehol__drop_invalid: 1
+# The comment says 'kernel' is considered a security threat
+firehol__conntrack_helpers_assignment: 'kernel'  # 'firehol', 'manual'
+
+## Logging
+firehol__log_mode: 'LOG'  # 'ULOG', 'NFLOG'
+firehol__log_options: ''  # '--log-tcp-options --log-ip-options'
+firehol__log_prefix: 'firehol: '
+firehol__log_level: 'warning'  # or other syslog log levels
+firehol__log_frequency: '1/second'
+firehol__log_burst: '5'
+
+# settings for default rule for ansible controllers
+firehol__ansible_controllers: "{{ ansible_local.core.ansible_controllers | d([]) if 
+                                 (ansible_local|d() and ansible_local.core|d()) else 
+                                 [ansible_env.SSH_CLIENT | split(' ') | first | ipaddr('address')]
+                              }}"
+firehol__ansible_controllers_services: ['ssh', 'ping']
+firehol__ansible_controllers_interface: 'any'
+firehol__ansible_controllers_interface_name: 'controller'
+
+# Default interface used if none is defined, should be 'any'
+firehol__default_interface: 'any'
+# Default ip version, will create interfaces with this version
+firehol__default_ip_version: 4  # (4, 6, 46)
+
+### Interfaces
+firehol__interfaces: []
+firehol__group_interfaces: []
+firehol__host_interfaces: []
+firehol__dependent_interfaces: []
+
+# will be ['controller', 'any', 'eth0'] on a simple host
+firehol__default_interfaces: "{{ firehol__virtual_interfaces + firehol__system_interfaces }}"
+
+# all local interfaces
+firehol__system_interfaces: >
+  {%- set listo = [] %}
+  {%- for i in ansible_interfaces | reject('equalto', 'lo') %}
+  {%-   set listo = listo.append( {'name': i, 'realif': i, 'w': 9, 'ipv': firehol__default_ip_version} ) %}
+  {%- endfor %}
+  {{- listo -}}
+# default "(any)controller" and "any" interface
+firehol__virtual_interfaces:
+  - name: "{{ firehol__ansible_controllers_interface_name }}"
+    realif: "{{ firehol__ansible_controllers_interface }}"
+    rule_params: src "{{ firehol__ansible_controllers|join(' ') }}"
+    w: 0  # weight 0, highest priority
+    ipv: "{{ firehol__default_ip_version }}" # 4, 6 or 46
+  - name: "{{ firehol__default_interface }}"
+    realif: "{{ firehol__default_interface }}"
+    rule_params: ''
+    w: 1
+    ipv: "{{ firehol__default_ip_version }}"
+
+### Services
+firehol__services: []
+firehol__group_services: []
+firehol__host_services: []
+firehol__dependent_services: []
+firehol__default_services:
+  - name: tinc
+    ports: 'tcp/655 udp/655'  # or 'tcp,udp/655[,656]'
+    description: Tinc VPN
+
+### Rules
+firehol__rules: []
+firehol__group_rules: []
+firehol__host_rules: []
+firehol__dependent_rules: []
+# Default rule allows ssh, ping from ansible controller. Outbound connections are denied!
+firehol__default_rules:
+  - type: policy
+    interface: "{{ firehol__ansible_controllers_interface_name }}"
+    action: RETURN
+  - type: server
+    interface: "{{ firehol__ansible_controllers_interface_name }}"
+    services: "{{ firehol__ansible_controllers_services }}"
+    action: 'accept'
+    rule_params: ''

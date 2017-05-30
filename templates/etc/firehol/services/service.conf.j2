@@ -1,0 +1,6 @@
+#FHVER: 1:213
+#
+# {{ item.name|d }} - {{ item.description|d('no description') }}
+#
+server_{{ item.name }}_ports="{{ item.ports }}"
+client_{{ item.name }}_ports="{{ 'default' }}"

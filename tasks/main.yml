@@ -1,0 +1,92 @@
+---
+
+# Currently there is no firehol package in EPEL for centos, debian is ok, others unknown.
+- name: Install firehol
+  package:
+    name: firehol
+    state: present
+  when: firehol__enabled and ansible_distribution|lower not in ['centos', 'rhel'] 
+
+# - name: Install firehol on centos
+#   yum:
+#     name: "{{ firehol__rpm_url }}"
+#     state: present
+#   when: firehol__enabled and ansible_distribution|lower in ['centos'] 
+
+- name: Enable firehol service
+  service: 
+    name: firehol
+    enabled: yes
+  when: firehol__enabled
+
+- name: "Firehol default configuration"
+  template: 
+    src: "etc/firehol/firehol-defaults.conf.j2" 
+    dest: "/etc/firehol/firehol-defaults.conf"
+    owner: root
+    group: root
+    mode: 0644
+  notify:
+    - restart firehol
+
+- name: Firehol delete services
+  file:
+    dest: '/etc/firehol/services/{{ item.name }}.conf'
+    state: absent 
+  with_flattened:
+    - "{{ firehol__services|d([]) }}"
+    - "{{ firehol__group_services|d([]) }}"
+    - "{{ firehol__host_services|d([]) }}"
+    - "{{ firehol__dependent_services|d([]) }}"
+    - "{{ firehol__default_services|d([]) }}"
+  when: item.name|d() and item.state|d('present') == 'absent'
+
+- name: 'Firehol configure services'
+  template:
+    src: 'etc/firehol/services/service.conf.j2' 
+    dest: '/etc/firehol/services/{{ item.name }}.conf'
+    owner: root
+    group: root
+    mode: 0644
+  with_flattened:
+    - "{{ firehol__services|d([]) }}"
+    - "{{ firehol__group_services|d([]) }}"
+    - "{{ firehol__host_services|d([]) }}"
+    - "{{ firehol__dependent_services|d([]) }}"
+    - "{{ firehol__default_services|d([]) }}"
+  when: item.name|d() and item.state|d('present') == 'present'
+  register: firehol__reg_svc_change
+  notify:
+    - restart firehol
+
+- name: Firehol configure rules
+  template: 
+    src: "etc/firehol/firehol.conf.j2" 
+    dest: "/etc/firehol/firehol.conf"
+    owner: root
+    group: root
+    mode: 0644
+  # make the lists going into the template explicit
+  with_items:
+    - __interfaces: "{{ firehol__interfaces + firehol__group_interfaces + firehol__host_interfaces + firehol__dependent_interfaces + firehol__default_interfaces }}"
+      __rules: "{{ firehol__rules + firehol__group_rules + firehol__host_rules + firehol__dependent_rules|sum(start=[]) + firehol__default_rules }}"
+  register: firehol__reg_rule_change
+  notify:
+    - restart firehol
+
+# workaround firehol debug does not return 0 on success
+- name: Firehol validate rule configuration
+  shell: /sbin/firehol debug 2>&1 | grep "^\s\+WARNING\|ERROR"
+  when: firehol__reg_rule_change.changed or firehol__reg_svc_change.changed
+  register: __ret
+  failed_when: __ret.rc != 1
+
+- name: "Firehol local rules TEST"
+  template: 
+    src: "etc/firehol/firehol.conf.j2" 
+    dest: "/home/matse/dev/mozpire/firehol.conf.test"
+  with_items:
+    - __interfaces: "{{ firehol__interfaces + firehol__group_interfaces + firehol__host_interfaces + firehol__dependent_interfaces + firehol__default_interfaces }}"
+      __rules: "{{ firehol__rules + firehol__group_rules + firehol__host_rules + firehol__dependent_rules|sum(start=[]) + firehol__default_rules }}"
+  delegate_to: localhost
+  become: False

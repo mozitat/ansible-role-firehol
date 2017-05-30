@@ -1,0 +1,6 @@
+---
+- name: restart firehol
+  service: 
+    name: firehol
+    state: restarted
+  when: firehol__enabled

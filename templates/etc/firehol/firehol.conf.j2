@@ -1,0 +1,43 @@
+# {{ ansible_managed }}
+{# TODO for future implementation:  -#}
+{#- - rule weights if necessary? -#}
+{#- - if rule.state == present|absent -#}
+{#- - interfaces without rules could be left out (not created) -#}
+
+version {{ firehol__conf_version|d(6) }}
+{# # Interface processing -#}
+{%- set interfaces = [] %}
+{%- for intf in item.__interfaces %}
+{%-   set tmp =  intf if 'w' in intf else intf | combine({'w': 99}) %}
+    {#- 2 Variations of appending to list, set with unused var or empty print statement #}
+    {#- Another possibility: |map('combine', {'w': 9})|list #}
+{%-   set nil = interfaces.append(tmp) %}
+{#- {{ interfaces.append(tmp) and '' }} #}
+{%- endfor %}
+{%- set interfaces = interfaces|sort(attribute='w') %}
+{#- # Rule processing #}
+{%- set rules_all = item.__rules %}
+{%- set rules_policy = rules_all|selectattr('type', 'equalto', 'policy')|list %}
+{%- set rules_protection = rules_all|selectattr('type', 'equalto', 'protection')|list %}
+{%- set rules_server = rules_all|selectattr('type', 'equalto', 'server')|list %}
+{%- set rules_client = rules_all|selectattr('type', 'equalto', 'client')|list %}
+
+# All rules sorted by interface
+{# {% for i in rules_interfaces|sort %} #}
+{% for i in interfaces %}
+interface{{ i.ipv|d('4') }} "{{ i.realif }}" "{{ i.name }}" {{ i.rule_params|d('') }}
+{%   for e in rules_policy if e.interface|d(firehol__default_interface) == i.name %}
+    {#- Use the first policy, there should only be one policy #}
+    {{ '{} {}'.format(e.type, e.action) if loop.index0 < 1 else '' }}
+{%   endfor %}
+{%   for e in rules_protection if e.interface|d(firehol__default_interface) == i.name %}
+    {{ '{} {}'.format(e.type, e.action) }}
+{%   endfor %}
+{%   for e in rules_server if e.interface|d(firehol__default_interface) == i.name %}
+    {{ '{} "{}" {} {}'.format(e.type, e.services|join(' '), e.action, e.params|d()) }}
+{%   endfor %}
+{%   for e in rules_client if e.interface|d(firehol__default_interface) == i.name %}
+    {{ '{} "{}" {} {}'.format(e.type, e.services|join(' '), e.action, e.params|d()) }}
+{%   endfor %}
+{{ '' }}
+{% endfor %}
